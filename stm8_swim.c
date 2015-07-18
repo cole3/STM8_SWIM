@@ -178,12 +178,13 @@ static swim_ret swim_read(unsigned int addr, unsigned char *buf, unsigned int si
     unsigned char cur_len, i;
     unsigned int cur_addr = addr;
     swim_ret ret = SWIM_OK;
+    unsigned char first = 0;
 
     if (!buf)
     {
         return SWIM_FAIL;
     }
-
+    printk("swim_read addr=0x%X, size=0x%X\n", addr, size);
     while (size)
     {
         cur_len = (size > 255) ? 255 : size;
@@ -226,6 +227,9 @@ static swim_ret swim_read(unsigned int addr, unsigned char *buf, unsigned int si
                 return_line = __LINE__;
                 break;
             }
+
+            if (first == 0)
+                first = *(buf - 1);
         }
         if (ret)
         {
@@ -235,7 +239,7 @@ static swim_ret swim_read(unsigned int addr, unsigned char *buf, unsigned int si
         cur_addr += cur_len;
         size -= cur_len;
     }
-
+    printk("swim_read addr=0x%X, data=0x%X, ret=%d\n", addr, first, ret);
     return ret;
 }
 
@@ -382,7 +386,7 @@ static swim_ret swim_entry(void)
         return_line = __LINE__;
         return ret;
     }
-
+    
     swim_mdelay(10);
     p_input->io_set(RST, HIGH);
     swim_mdelay(10);
