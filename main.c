@@ -153,9 +153,30 @@ void swim_io_set(io_name io, swim_level level)
 
 swim_level swim_io_get(io_name io)
 {
+    //printk("swim_io_get %d\n", readl(S3C64XX_GPEDAT) & (1 << 3));
     return (readl(S3C64XX_GPEDAT) & (1 << 3)) ? HIGH : LOW;
 }
 
+
+static void swim_io_test(void)
+{
+    swim_io_set(RST, HIGH);
+    printk("RST(GPE1) => HIGH\n");
+    mdelay(5000);
+    swim_io_set(RST, LOW);
+    printk("RST(GPE1) => LOW\n");
+    mdelay(5000);
+    swim_io_set(SWIM, HIGH);
+    printk("SWIM(GPE2) => HIGH\n");
+    mdelay(5000);
+    swim_io_set(SWIM, LOW);
+    printk("SWIM(GPE2) => LOW\n");
+    mdelay(5000);
+    while (swim_io_get(SWIM) == HIGH);
+    printk("SWIM(GPE3) <= LOW\n");
+    while (swim_io_get(SWIM) == LOW);
+    printk("SWIM(GPE3) <= HIGH\n");
+}
 
 void swim_stop( void )
 {
@@ -216,50 +237,24 @@ static int __init dev_init(void)
 {
 	int ret;
     struct clk   *timer_clock;
-
+    
 	init_MUTEX(&lock);
 	ret = misc_register(&misc);
-
+    
     timer_clock = clk_get(NULL, "timers");
     if (!timer_clock) {
         printk(KERN_ERR "failed to get adc clock source\n");
         return -ENOENT;
     }
     clk_enable(timer_clock);
-
-    //local_irq_disable();
-    printk("start delay\n");
-    s3c6410_ndelay(1250);
-    printk("end delay\n");
-    //local_irq_enable();
-
-
+    
     swim_init_io();
-
-#if 0 // io test
-    swim_io_set(RST, HIGH);
-    printk("RST(GPE1) => HIGH\n");
-    mdelay(5000);
-    swim_io_set(RST, LOW);
-    printk("RST(GPE1) => LOW\n");
-    mdelay(5000);
-    swim_io_set(SWIM, HIGH);
-    printk("SWIM(GPE2) => HIGH\n");
-    mdelay(5000);
-    swim_io_set(SWIM, LOW);
-    printk("SWIM(GPE2) => LOW\n");
-    mdelay(5000);
-    while (swim_io_get(SWIM) == HIGH);
-    printk("SWIM(GPE3) <= LOW\n");
-    while (swim_io_get(SWIM) == LOW);
-    printk("SWIM(GPE3) <= HIGH\n");
-#endif
-
+    
     input.ndelay = s3c6410_ndelay;
     input.io_set = swim_io_set;
     input.io_get = swim_io_get;
     input.private = NULL;
-
+    
     swim = swim_register(&input);
     if (!swim)
     {
@@ -267,14 +262,16 @@ static int __init dev_init(void)
         return -1;
     }
 
+    local_irq_disable();
     ret = swim->entry();
     if (ret)
     {
         printk("entry fail! ret = %d, return_line = %d\n", ret, return_line);
     }
+    local_irq_enable();
 
-	printk (DEVICE_NAME"\tinitialized\n");
-    	return ret;
+    printk (DEVICE_NAME"\tinitialized\n");
+    return ret;
 }
 
 static void __exit dev_exit(void)

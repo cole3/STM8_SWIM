@@ -1,3 +1,4 @@
+#include <linux/kernel.h>
 #include "stm8_swim.h"
 
 /********************************************************
@@ -100,7 +101,7 @@ static char swim_rvc_ack(void)
 
 static swim_ret swim_send_unit(unsigned char data, unsigned char len, unsigned int retry_cnt)
 {
-    char i;
+    signed char i;
     unsigned char p, m;
     char ack = 0;
 
@@ -116,7 +117,7 @@ static swim_ret swim_send_unit(unsigned char data, unsigned char len, unsigned i
             p += m;
         }
         // parity bit
-        swim_send_bit((p & 1));
+        swim_send_bit(p & 1);
         ack = swim_rvc_ack();
         if (ack == -1)
         {
@@ -129,7 +130,7 @@ static swim_ret swim_send_unit(unsigned char data, unsigned char len, unsigned i
 
 static swim_ret swim_rcv_unit(unsigned char *data, unsigned char len)
 {
-    unsigned int i;
+    char i;
     unsigned char s = 0, m = 0, p = 0, cp = 0;
     char ack = 0;
 
@@ -306,9 +307,11 @@ static swim_ret swim_write(unsigned int addr, unsigned char *buf, unsigned int s
 
 static swim_ret swim_entry(void)
 {
-    unsigned char i, m;
+    unsigned int i;
     swim_ret ret = SWIM_FAIL;
-    unsigned char buf[1];
+    unsigned char m, buf[1];
+
+    printk("enter swim_entry.\n");
 
     p_input->io_set(SWIM, HIGH);
     p_input->io_set(RST, HIGH);
@@ -316,7 +319,7 @@ static swim_ret swim_entry(void)
     p_input->io_set(RST, LOW);
     swim_mdelay(10);
     p_input->io_set(SWIM, LOW);
-    swim_udelay(100);
+    swim_udelay(1000);
 
     for (i=0; i<4; i++)
     {
@@ -336,11 +339,11 @@ static swim_ret swim_entry(void)
     p_input->io_set(SWIM, HIGH);
     m = 1;
 
-#define RST_CHK_TIMEOUT 1000
+#define RST_CHK_TIMEOUT 10000
     // about 16 us
     for (i=0; i<RST_CHK_TIMEOUT; i++)
     {
-        swim_ndelay(500);
+        swim_ndelay(125);
         if (p_input->io_get(SWIM) == LOW)
         {
             m = 0;
@@ -351,9 +354,11 @@ static swim_ret swim_entry(void)
             ret = SWIM_OK;
         }
     }
+    printk("send seq header done.\n");
 
     if (ret)
     {
+        p_input->io_set(RST, HIGH);
         return_line = __LINE__;
         return ret;
     }
@@ -362,15 +367,18 @@ static swim_ret swim_entry(void)
     ret = swim_reset();
     if (ret)
     {
+        p_input->io_set(RST, HIGH);
         return_line = __LINE__;
         return ret;
     }
+    printk("swim_reset done.\n");
 
     swim_mdelay(30);
     buf[0]=0xA0;
     ret = swim_write(0x00007F80, buf, 1); 
     if (ret)
     {
+        p_input->io_set(RST, HIGH);
         return_line = __LINE__;
         return ret;
     }
@@ -378,7 +386,6 @@ static swim_ret swim_entry(void)
     swim_mdelay(10);
     p_input->io_set(RST, HIGH);
     swim_mdelay(10);
-    
 
     return ret;
 }
