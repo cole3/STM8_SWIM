@@ -1,3 +1,12 @@
+/********************************************************
+ *      mini6410                 STM8
+ * -------------------       ------------
+ * |      (GPE1) rst |>----->| rst      |
+ * |  (GPE2) swim_in |<----+-| swim     |
+ * | (GPE3) swim_out |>---/  |          |
+ * -------------------       ------------
+ *******************************************************/
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
@@ -16,6 +25,7 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/miscdevice.h>
+#include <linux/slab.h>
 
 #include <mach/map.h>
 #include <mach/regs-clock.h>
@@ -23,13 +33,13 @@
 
 #include <plat/gpio-cfg.h>
 #include <mach/gpio-bank-e.h>
-#include <mach/gpio-bank-f.h>
-#include <mach/gpio-bank-k.h>
 
 #include "stm8_swim.h"
 
 
 #define DEVICE_NAME     "swim"
+
+#define SWIM_IOCTL_RESET    1
 
 
 static struct semaphore lock;
@@ -153,7 +163,6 @@ void swim_io_set(io_name io, swim_level level)
 
 swim_level swim_io_get(io_name io)
 {
-    //printk("swim_io_get %d\n", readl(S3C64XX_GPEDAT) & (1 << 3));
     return (readl(S3C64XX_GPEDAT) & (1 << 3)) ? HIGH : LOW;
 }
 
@@ -178,19 +187,137 @@ static void swim_io_test(void)
     printk("SWIM(GPE3) <= HIGH\n");
 }
 
-void swim_stop( void )
-{
 
+static ssize_t s3c64xx_swim_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+{
+    swim_ret ret;
+    unsigned int addr = *ppos;
+    unsigned char *kbuf = NULL;
+    
+    kbuf = kmalloc(count, GFP_KERNEL);
+    if (!kbuf)
+    {
+        printk("kmalloc %d bytes fail!\n", count);
+        return 0;
+    }
+
+    printk("swim read addr = 0x%x, size = 0x%x\n", addr, count);
+
+    local_irq_disable();
+    ret = swim->read(addr, kbuf, count);
+    if (ret)
+    {
+        printk("resd fail! ret = %d, return_line = %d\n", ret, return_line);
+    }
+    local_irq_enable();
+
+    if (copy_to_user(buf, kbuf, count))
+    {
+        printk("copy_to_user fail!\n");
+        return 0;
+    }
+
+    kfree(kbuf);
+
+    return count;
+}
+
+static ssize_t s3c64xx_swim_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+{
+    swim_ret ret;
+    unsigned int addr = *ppos;
+    unsigned char *kbuf = NULL;
+    
+    kbuf = kmalloc(count, GFP_KERNEL);
+    if (!kbuf)
+    {
+        printk("kmalloc %d bytes fail!\n", count);
+        return 0;
+    }
+
+    if (copy_from_user(kbuf, buf, count))
+    {
+        printk("copy_from_user fail!\n");
+        return 0;
+    }
+
+    printk("swim write addr = 0x%x, size = 0x%x\n", addr, count);
+
+    local_irq_disable();
+    ret = swim->write(addr, kbuf, count);
+    if (ret)
+    {
+        printk("write fail! ret = %d, return_line = %d\n", ret, return_line);
+    }
+    local_irq_enable();
+
+    kfree(kbuf);
+
+    return count;
+}
+
+static loff_t s3c64xx_swim_seek(struct file *file, loff_t offset, int orig)
+{
+    loff_t ret;
+
+    switch (orig) 
+    {
+        case SEEK_CUR:
+            offset += file->f_pos;
+        case SEEK_SET:
+            file->f_pos = offset;
+            ret = file->f_pos;
+            break;
+        default:
+            ret = -EINVAL;
+    }
+
+    return ret;
+}
+
+static long s3c64xx_swim_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+    swim_ret ret = 0;
+
+    switch (cmd)
+    {
+        case SWIM_IOCTL_RESET:
+            local_irq_disable();
+            ret = swim->reset();
+            if (ret)
+            {
+                printk("reset fail! ret = %d, return_line = %d\n", ret, return_line);
+            }
+            local_irq_enable();
+            break;
+        default:
+            break;
+    }
+
+    return ret;
 }
 
 static int s3c64xx_swim_open(struct inode *inode, struct file *file)
 {
-	if (!down_trylock(&lock))
-		return 0;
-	else
-		return -EBUSY;
-}
+    swim_ret ret;
 
+	if (down_trylock(&lock))
+    {
+        return -EBUSY;
+    }
+
+    file->f_pos = 0;
+
+    local_irq_disable();
+    ret = swim->entry();
+    if (ret)
+    {
+        printk("entry fail! ret = %d, return_line = %d\n", ret, return_line);
+    }
+    local_irq_enable();
+
+    return 0;
+}
 
 static int s3c64xx_swim_close(struct inode *inode, struct file *file)
 {
@@ -198,33 +325,14 @@ static int s3c64xx_swim_close(struct inode *inode, struct file *file)
 	return 0;
 }
 
-
-static long s3c64xx_swim_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
-{
-	switch (cmd) {
-#if 0
-		case SWIM_IOCTL_SET_FREQ:
-			if (arg == 0)
-				return -EINVAL;
-			//swim_set_freq(arg);
-			break;
-
-		case swim_IOCTL_STOP:
-#endif  
-		default:
-			swim_stop();
-			break;
-	}
-
-	return 0;
-}
-
-
 static struct file_operations dev_fops = {
     .owner			= THIS_MODULE,
     .open			= s3c64xx_swim_open,
     .release		= s3c64xx_swim_close, 
-    .unlocked_ioctl	= s3c64xx_swim_ioctl,
+    .write          = s3c64xx_swim_write,
+    .read           = s3c64xx_swim_read,
+    .llseek         = s3c64xx_swim_seek,
+    .unlocked_ioctl = s3c64xx_swim_ioctl,
 };
 
 static struct miscdevice misc = {
@@ -235,40 +343,32 @@ static struct miscdevice misc = {
 
 static int __init dev_init(void)
 {
-	int ret;
-    struct clk   *timer_clock;
-    
+	swim_ret ret;
+    struct clk *timer_clock;
+
 	init_MUTEX(&lock);
 	ret = misc_register(&misc);
-    
+
     timer_clock = clk_get(NULL, "timers");
     if (!timer_clock) {
         printk(KERN_ERR "failed to get adc clock source\n");
         return -ENOENT;
     }
     clk_enable(timer_clock);
-    
+
     swim_init_io();
-    
+
     input.ndelay = s3c6410_ndelay;
     input.io_set = swim_io_set;
     input.io_get = swim_io_get;
     input.private = NULL;
-    
+
     swim = swim_register(&input);
     if (!swim)
     {
         printk("swim = NULL!\n");
         return -1;
     }
-
-    local_irq_disable();
-    ret = swim->entry();
-    if (ret)
-    {
-        printk("entry fail! ret = %d, return_line = %d\n", ret, return_line);
-    }
-    local_irq_enable();
 
     printk (DEVICE_NAME"\tinitialized\n");
     return ret;
@@ -279,6 +379,7 @@ static void __exit dev_exit(void)
     swim_unregister(swim);
 	misc_deregister(&misc);
 }
+
 
 module_init(dev_init);
 module_exit(dev_exit);
