@@ -1,6 +1,6 @@
 ifneq ($(KERNELRELEASE),)
 
-obj-m := stm8_swim.o
+obj-m := main.o stm8_swim.o
 
 else
 	
