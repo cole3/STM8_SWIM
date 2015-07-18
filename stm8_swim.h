@@ -19,8 +19,8 @@ typedef enum {
 
 typedef struct {
     void (*ndelay)(unsigned int ns);
-    void (*io_set)(io_name io, int level);
-    int (*io_get)(io_name io);
+    void (*io_set)(io_name io, swim_level level);
+    swim_level (*io_get)(io_name io);
     void *private;
 } swim_input;
 
@@ -33,6 +33,9 @@ typedef struct {
 } swim_method;
 
 extern unsigned int return_line;
+
+swim_method *swim_register(swim_input *swim_input);
+void swim_unregister(swim_method *method);
 
 #endif
 

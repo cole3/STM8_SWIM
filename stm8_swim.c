@@ -56,9 +56,9 @@ static void swim_send_bit(unsigned char bit)
     else
     {
         p_input->io_set(SWIM, LOW);
-        swim_ndelay(2500); // 2*(1/8M) = 250ns
+        swim_ndelay(2500); // 2*(1/8M) = 2500ns
         p_input->io_set(SWIM, HIGH);
-        swim_ndelay(250); // 20*(1/8M) = 2500ns
+        swim_ndelay(250); // 20*(1/8M) = 250ns
     }
 }
 

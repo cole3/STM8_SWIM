@@ -33,11 +33,14 @@
 
 
 static struct semaphore lock;
+static swim_method *swim;
+static swim_input input;
+
 
 /* 
  * pclk = 66.5MHz, min valid delay = 15ns, and max deviation = 15ns
  */
-static void s3c6410_ndelay(unsigned long ns)
+static void s3c6410_ndelay(unsigned int ns)
 {
 	unsigned long tcon;
 	unsigned long tcnt;
@@ -47,13 +50,6 @@ static void s3c6410_ndelay(unsigned long ns)
 
 	struct clk *clk_p;
 	unsigned long pclk;
-
-#if 0 // PWM IO
-	tmp = readl(S3C64XX_GPFCON);
-	tmp &= ~(0x3U << 28);
-	tmp |=  (0x2U << 28);
-	writel(tmp, S3C64XX_GPFCON);
-#endif
 
 	tcon = __raw_readl(S3C_TCON);
 	tcfg1 = __raw_readl(S3C_TCFG1);
@@ -98,17 +94,72 @@ static void s3c6410_ndelay(unsigned long ns)
     //printk("after S3C_TINT_CSTAT 0x%X\n", __raw_readl(S3C_TINT_CSTAT));
 }
 
+
 static void swim_init_io(void)
 {
+    unsigned long tmp;
+
+    // GPE1 -> RST (open drain); GPE2 -> SWIM_OUT (open drain); GPE3 -> SWIM_IN (floating)
+    tmp = readl(S3C64XX_GPECON);
+    tmp &= ~(0xF << 4);
+    tmp |= 1 << 4;
+    tmp &= ~(0xF << 8);
+    tmp |= 1 << 8;
+    tmp &= ~(0xF << 12);
+    writel(tmp, S3C64XX_GPECON);
     
+    tmp = readl(S3C64XX_GPEPUD);
+    tmp &= ~(0x3F << 2);
+    writel(tmp, S3C64XX_GPEPUD);
+
+    tmp = readl(S3C64XX_GPEDAT);
+    tmp |= (0x3 << 1);
+    writel(tmp, S3C64XX_GPEDAT);
 }
+
+void swim_io_set(io_name io, swim_level level)
+{
+    unsigned long tmp = readl(S3C64XX_GPEDAT);
+
+    switch (io)
+    {
+        case RST:
+            if (level == HIGH)
+            {
+                tmp |= 1 << 1;
+            }
+            else
+            {
+                tmp &= ~(1 << 1);
+            } 
+            break;
+        case SWIM:
+            if (level == HIGH)
+            {
+                tmp |= 1 << 2;
+            }
+            else
+            {
+                tmp &= ~(1 << 2);
+            } 
+            break;
+        default:
+            printk("No define this io: %d!\n", io);
+            break;
+    }
+    
+    writel(tmp, S3C64XX_GPEDAT);
+}
+
+swim_level swim_io_get(io_name io)
+{
+    return (readl(S3C64XX_GPEDAT) & (1 << 3)) ? HIGH : LOW;
+}
+
 
 void swim_stop( void )
 {
-	unsigned tmp;
-	tmp = readl(S3C64XX_GPFCON);
-	tmp &= ~(0x3U << 28);
-	writel(tmp, S3C64XX_GPFCON);
+
 }
 
 static int s3c64xx_swim_open(struct inode *inode, struct file *file)
@@ -182,12 +233,53 @@ static int __init dev_init(void)
     printk("end delay\n");
     //local_irq_enable();
 
+
+    swim_init_io();
+
+#if 0 // io test
+    swim_io_set(RST, HIGH);
+    printk("RST(GPE1) => HIGH\n");
+    mdelay(5000);
+    swim_io_set(RST, LOW);
+    printk("RST(GPE1) => LOW\n");
+    mdelay(5000);
+    swim_io_set(SWIM, HIGH);
+    printk("SWIM(GPE2) => HIGH\n");
+    mdelay(5000);
+    swim_io_set(SWIM, LOW);
+    printk("SWIM(GPE2) => LOW\n");
+    mdelay(5000);
+    while (swim_io_get(SWIM) == HIGH);
+    printk("SWIM(GPE3) <= LOW\n");
+    while (swim_io_get(SWIM) == LOW);
+    printk("SWIM(GPE3) <= HIGH\n");
+#endif
+
+    input.ndelay = s3c6410_ndelay;
+    input.io_set = swim_io_set;
+    input.io_get = swim_io_get;
+    input.private = NULL;
+
+    swim = swim_register(&input);
+    if (!swim)
+    {
+        printk("swim = NULL!\n");
+        return -1;
+    }
+
+    ret = swim->entry();
+    if (ret)
+    {
+        printk("entry fail! ret = %d, return_line = %d\n", ret, return_line);
+    }
+
 	printk (DEVICE_NAME"\tinitialized\n");
     	return ret;
 }
 
 static void __exit dev_exit(void)
 {
+    swim_unregister(swim);
 	misc_deregister(&misc);
 }
 
