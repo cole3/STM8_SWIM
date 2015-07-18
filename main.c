@@ -166,7 +166,7 @@ swim_level swim_io_get(io_name io)
     return (readl(S3C64XX_GPEDAT) & (1 << 3)) ? HIGH : LOW;
 }
 
-
+#if 0 // io test
 static void swim_io_test(void)
 {
     swim_io_set(RST, HIGH);
@@ -186,7 +186,7 @@ static void swim_io_test(void)
     while (swim_io_get(SWIM) == LOW);
     printk("SWIM(GPE3) <= HIGH\n");
 }
-
+#endif
 
 static ssize_t s3c64xx_swim_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
@@ -321,7 +321,18 @@ static int s3c64xx_swim_open(struct inode *inode, struct file *file)
 
 static int s3c64xx_swim_close(struct inode *inode, struct file *file)
 {
+    swim_ret ret;
+
+    local_irq_disable();
+    ret = swim->reset();
+    if (ret)
+    {
+        printk("reset fail! ret = %d, return_line = %d\n", ret, return_line);
+    }
+    local_irq_enable();
+
 	up(&lock);
+
 	return 0;
 }
 
